@@ -1,0 +1,64 @@
+# ASP.NET Core
+# Build and test ASP.NET Core projects targeting .NET Core.
+# Add steps that run tests, create a NuGet package, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+
+trigger:
+- main
+
+variables:
+- name: csprojfile
+  value: src/MvcMovie/MvcMovie.csproj
+- name: artifactName
+  value: drop
+- name: serviceConnection
+  value: 'adosc-deployapp-uami'
+- name: targetWebappName
+  value: web-deploy0303
+
+jobs:
+- job: build
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - task: DotNetCoreCLI@2
+    displayName: restore project
+    inputs:
+      command: 'restore'
+      projects: ${{ variables.csprojfile }}
+  - task: DotNetCoreCLI@2
+    displayName: build project
+    inputs:
+      command: 'build'
+      projects: ${{ variables.csprojfile }}
+  - task: DotNetCoreCLI@2
+    displayName: publish project
+    inputs:
+      command: 'publish'
+      projects: ${{ variables.csprojfile }}
+      publishWebProjects: true
+      arguments: '--output $(Build.ArtifactStagingDirectory)'
+  - task: PublishPipelineArtifact@1
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)'
+      artifact: ${{variables.artifactName}}
+      publishLocation: 'pipeline'
+
+- job: deploy
+  dependsOn: build
+  condition: succeeded()
+  pool:
+    vmImage: ubuntu-latest
+  steps:
+  - task: DownloadPipelineArtifact@2
+    inputs:
+      buildType: 'current'
+      artifactName: ${{variables.artifactName}}
+      targetPath: '$(Pipeline.Workspace)'
+  - task: AzureRmWebAppDeployment@5
+    inputs:
+      ConnectionType: 'AzureRM'
+      azureSubscription: ${{variables.serviceConnection}}
+      appType: 'webApp'
+      WebAppName: ${{variables.targetWebappName}}
+      packageForLinux: '$(Pipeline.Workspace)/*.zip'

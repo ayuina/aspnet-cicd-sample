@@ -1,0 +1,25 @@
+# ASP.NET Core
+# Build and test ASP.NET Core projects targeting .NET Core.
+# Add steps that run tests, create a NuGet package, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+
+trigger: none
+
+variables:
+- name: csprojfile
+  value: src/MvcMovie/MvcMovie.csproj
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+- task: DotNetCoreCLI@2
+  displayName: restore project
+  inputs:
+    command: 'restore'
+    projects: ${{ variables.csprojfile }}
+- task: DotNetCoreCLI@2
+  displayName: build project
+  inputs:
+    command: 'build'
+    projects: ${{ variables.csprojfile }}

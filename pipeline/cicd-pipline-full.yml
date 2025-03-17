@@ -1,0 +1,128 @@
+# ASP.NET Core
+# Build and test ASP.NET Core projects targeting .NET Core.
+# Add steps that run tests, create a NuGet package, deploy, and more:
+# https://docs.microsoft.com/azure/devops/pipelines/languages/dotnet-core
+
+trigger:
+- main
+
+variables:
+- name: csprojfile
+  value: src/MvcMovie/MvcMovie.csproj
+- name: artifactName
+  value: drop
+- name: serviceConnection
+  value: 'adosc-deployapp-uami'
+
+stages:
+- stage: 'Build'
+  jobs:
+  - job: build
+    pool:
+      vmImage: ubuntu-latest
+    steps:
+    - task: DotNetCoreCLI@2
+      displayName: restore project
+      inputs:
+        command: 'restore'
+        projects: ${{ variables.csprojfile }}
+    - task: DotNetCoreCLI@2
+      displayName: build project
+      inputs:
+        command: 'build'
+        projects: ${{ variables.csprojfile }}
+    - task: DotNetCoreCLI@2
+      displayName: publish project
+      inputs:
+        command: 'publish'
+        projects: ${{ variables.csprojfile }}
+        publishWebProjects: true
+        arguments: '--output $(Build.ArtifactStagingDirectory)'
+    - task: PowerShell@2
+      displayName: 'contain bicep file'
+      inputs:
+        targetType: 'inline'
+        script: |
+          copy ./infra $(Build.ArtifactStagingDirectory) -Recurse
+          dir $(Build.ArtifactStagingDirectory) -Depth 2
+    - task: PublishPipelineArtifact@1
+      inputs:
+        targetPath: '$(Build.ArtifactStagingDirectory)'
+        artifact: ${{variables.artifactName}}
+        publishLocation: 'pipeline'
+
+- stage: 'DeployToTest'
+  variables:
+  - group: TestEnvVars
+  jobs:
+  - deployment: deploy_testenv
+    environment:
+     name: test
+    pool:
+      vmImage: ubuntu-latest
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              buildType: 'current'
+              artifactName: ${{variables.artifactName}}
+              targetPath: '$(Pipeline.Workspace)'
+          - task: AzureResourceManagerTemplateDeployment@3
+            inputs:
+              deploymentScope: 'Resource Group'
+              azureResourceManagerConnection: ${{variables.serviceConnection}}
+              action: 'Create Or Update Resource Group'
+              resourceGroupName: 'rg-$(postfix)'
+              location: '$(region)'
+              templateLocation: 'Linked artifact'
+              csmFile: '$(Pipeline.Workspace)/infra/main.bicep'
+              overrideParameters: -region $(region) -isproduction $(isproduction) -postfix $(postfix)
+              deploymentMode: 'Incremental'
+              deploymentName: '$(Build.BuildNumber)'          
+          - task: AzureRmWebAppDeployment@5
+            inputs:
+              ConnectionType: 'AzureRM'
+              azureSubscription: ${{variables.serviceConnection}}
+              appType: 'webApp'
+              WebAppName: 'web-$(postfix)'
+              packageForLinux: '$(Pipeline.Workspace)/*.zip'
+
+- stage: 'DeployToProduction'
+  variables:
+  - group: ProdEnvVars
+  jobs:
+  - deployment: deploy_prodenv
+    environment:
+      name: prod
+    pool:
+      vmImage: ubuntu-latest
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - task: DownloadPipelineArtifact@2
+            inputs:
+              buildType: 'current'
+              artifactName: ${{variables.artifactName}}
+              targetPath: '$(Pipeline.Workspace)'
+          - task: AzureResourceManagerTemplateDeployment@3
+            inputs:
+              deploymentScope: 'Resource Group'
+              azureResourceManagerConnection: ${{variables.serviceConnection}}
+              action: 'Create Or Update Resource Group'
+              resourceGroupName: 'rg-$(postfix)'
+              location: '$(region)'
+              templateLocation: 'Linked artifact'
+              csmFile: '$(Pipeline.Workspace)/infra/main.bicep'
+              overrideParameters: -region $(region) -isproduction $(isproduction) -postfix $(postfix)
+              deploymentMode: 'Incremental'
+              deploymentName: '$(Build.BuildNumber)'          
+          - task: AzureRmWebAppDeployment@5
+            inputs:
+              ConnectionType: 'AzureRM'
+              azureSubscription: ${{variables.serviceConnection}}
+              appType: 'webApp'
+              WebAppName: 'web-$(postfix)'
+              packageForLinux: '$(Pipeline.Workspace)/*.zip'
